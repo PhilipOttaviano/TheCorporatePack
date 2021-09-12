@@ -1,0 +1,83 @@
+//Cg
+//
+//Cg profile arbvp1 arbfp1
+
+void vshader(float4 vtx_position : POSITION, 
+             float2 vtx_texcoord0 : TEXCOORD0,
+             out float4 l_position : POSITION,
+      	     out float2 l_texcoord0 : TEXCOORD0,
+             uniform float4 texpad_src,
+             uniform float4x4 mat_modelproj)
+{
+  l_position=mul(mat_modelproj, vtx_position);
+  l_texcoord0 = (vtx_position.xz * texpad_src.xy) + texpad_src.xy;
+}
+
+
+void fshader(float2 l_texcoord0 : TEXCOORD0,
+             out float4 o_color : COLOR,
+             uniform float2 texpix_src,
+             uniform sampler2D k_src : TEXUNIT0)
+{
+/*
+  float3 offset = float3(1.0*texpix_src.x, 2.0*texpix_src.x, 3.0*texpix_src.x);
+  o_color  = tex2D(k_src, l_texcoord0);
+  o_color += tex2D(k_src, float2(l_texcoord0.x - offset.z, l_texcoord0.y));
+  o_color += tex2D(k_src, float2(l_texcoord0.x - offset.y, l_texcoord0.y));
+  o_color += tex2D(k_src, float2(l_texcoord0.x - offset.x, l_texcoord0.y));
+  o_color += tex2D(k_src, float2(l_texcoord0.x + offset.x, l_texcoord0.y));
+  o_color += tex2D(k_src, float2(l_texcoord0.x + offset.y, l_texcoord0.y));
+  o_color += tex2D(k_src, float2(l_texcoord0.x + offset.z, l_texcoord0.y));
+  o_color /= 7;
+  o_color.w = 1;
+*/
+
+  // Equivalent, faster (only 4 lookups). Requires input and output textures to have the same resolution.
+  //
+  // The outer samples are self-explanatory; sampling at the halfway point of two texels gives the mean,
+  // and multiplied by 2.0 it becomes the sum of those two texels. We obtain contributions from two texels
+  // using only one texture lookup; the linear interpolation is done "for free" in hardware.
+  //
+  // As for the three texels at the center of the stencil, we could sample each of them independently,
+  // but actually two samples are enough. We could group them as (2,1), but the following solution treats
+  // the three texels in the most symmetric manner possible.
+  //
+  // Consider two linearly interpolated samples, covering three adjacent texels (a,b,c):
+  //
+  // lerp(a,b,k1) + lerp(b,c,k2)  =  (1-k1)*a + k1*b  +  (1-k2)*b + k2*c  =  (1-k1)*a + (1-k2+k1)*b + k2*c
+  //
+  // We want this expression to be a constant multiple of mean(a,b,c) (which itself is a constant multiple
+  // of sum(a,b,c)).
+  //
+  // This is done by requiring that all three coefficients are the same, and solving for k1 and k2.
+  //
+  // (One of the three conditions turns out to be redundant in this particular case; pick whichever two,
+  //  and the third will agree. Generally speaking, we can require only two independent things, because
+  //  we are using only two lerps, i.e. we have only two unknowns k1, k2. But here the transitivity
+  //  of equality comes to the rescue: if x1 = x2 and x2 = x3, then x1 = x3. Thus we really only have
+  //  two independent conditions.)
+  //
+  // The solution is k1 = 1/3,  k2 = 2/3;  plugging these values into the original expression,
+  // we get 2/3 * sum(a,b,c). Hence to get the sum, we must multiply this by 3/2
+  // (or equivalently, multiply each of the two lerps by 3/2).
+  //
+  // This gives us the sum of the three texels using only two texture lookups, utilizing the "free"
+  // linear interpolation in hardware.
+  //
+  // Finally, we set "a" as the pixel to the left from the center, "b" as the pixel at the center,
+  // and "c" as the pixel to the right of the center, and convert both offsets to be relative to the
+  // center pixel. (1/3 of the way "from a toward b" = coordinate of b - 2/3 pixels.)
+  //
+  // Combining these, we can compute the sum of 7 texels using 4 texture lookups.
+  //
+  const float4 offsets = float4( -2.5, -0.6667, 0.6667, 2.5 )*texpix_src.x;
+  const float4 weights = float4(  2.0,  1.5,    1.5,    2.0 );
+  const float w = 2.0 + 1.5 + 1.5 + 2.0;
+  o_color  = weights.x * tex2D(k_src, float2(l_texcoord0.x + offsets.x, l_texcoord0.y));
+  o_color += weights.y * tex2D(k_src, float2(l_texcoord0.x + offsets.y, l_texcoord0.y));
+  o_color += weights.z * tex2D(k_src, float2(l_texcoord0.x + offsets.z, l_texcoord0.y));
+  o_color += weights.w * tex2D(k_src, float2(l_texcoord0.x + offsets.w, l_texcoord0.y));
+  o_color /= w;
+//  o_color.a   = 1.0;
+}
+

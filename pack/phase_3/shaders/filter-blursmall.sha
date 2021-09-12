@@ -1,0 +1,45 @@
+//Cg
+//
+//Cg profile arbvp1 arbfp1
+
+void vshader(float4 vtx_position : POSITION, 
+             float2 vtx_texcoord0 : TEXCOORD0,
+             out float4 l_position : POSITION,
+      	     out float2 l_texcoord0 : TEXCOORD0,
+             uniform float4 texpad_src,
+             uniform float4x4 mat_modelproj)
+{
+  l_position=mul(mat_modelproj, vtx_position);
+  l_texcoord0 = (vtx_position.xz * texpad_src.xy) + texpad_src.xy;
+}
+
+
+void fshader(float2 l_texcoord0 : TEXCOORD0,
+             out float4 o_color : COLOR,
+             uniform float2 texpix_src,
+             uniform sampler2D k_src : TEXUNIT0)
+{
+  // Blur 17 texels using 5 taps in a single pass. We use a suitably scaled "knight's move sampling pattern"
+  // centered on the center pixel to hit four non-overlapping 2x2 blocks. We sample at the center point
+  // of each 2x2 block, utilizing the "free" linear interpolation in hardware to get the mean value
+  // of the block's four pixels using just one texture lookup.
+  //
+  // (5 includes the center tap; if it already exists, this needs only 4 additional taps.)
+  //
+  // GPU Gems 3, section 28.5.2:
+  // http://http.developer.nvidia.com/GPUGems3/gpugems3_ch28.html
+  // http://http.developer.nvidia.com/GPUGems3/elementLinks/28fig05.jpg
+  //
+  const float2 offs1 = float2(1.5,  0.5)*texpix_src;
+  const float2 offs2 = float2(0.5, -1.5)*texpix_src;
+  float4 color = tex2D(k_src, l_texcoord0);
+  color += 4.0*tex2D(k_src, l_texcoord0 + offs1);
+  color += 4.0*tex2D(k_src, l_texcoord0 - offs1);
+  color += 4.0*tex2D(k_src, l_texcoord0 + offs2);
+  color += 4.0*tex2D(k_src, l_texcoord0 - offs2);
+  color /= 17;
+//  color.a = 1;
+
+  o_color = color;
+}
+
